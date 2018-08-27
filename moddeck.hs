@@ -3,98 +3,155 @@ module GloomhavenModDeck where
 import Debug.Trace (trace, traceShow, traceShowId)
 import Text.Printf (printf)
 import Data.Ratio ((%))
-import Data.Map.Strict (Map)
+import Data.List (nub, sort)
+import Data.Monoid
+import Control.Applicative
 import qualified Data.Map.Strict as Map
 
 type Count = Integer
 type Damage = Integer
+type Probability = Rational
 type Card = String
+type Modifier = Damage -> Damage
 type Deck = [(Card, Count)]
-type DamageDistribution = [(Damage, Rational)]
+type DamageDistribution = [(Damage, Probability)]
 
-damageDistributionOfAttack :: (Damage -> Card -> Deck -> DamageDistribution) -> Deck -> Damage -> DamageDistribution
-damageDistributionOfAttack applyCard deck dmg =
-  group $ normalize $ filterZeroValues $ concatMap processOneCard deck
-  where
-    group :: (Ord key, Num val) => [(key, val)] -> [(key, val)]
-    group = Map.toList . Map.fromListWith (+)
+group :: (Ord key, Num val) => [(key, val)] -> [(key, val)]
+group = Map.toList . Map.fromListWith (+)
 
-    normalize :: DamageDistribution -> DamageDistribution
-    normalize list =
-      let s = sum $ map snd list in
-      map (\(item, w) -> (item, w / s)) list
+filterZeroValues :: (Num val, Eq val) => [(key, val)] -> [(key, val)]
+filterZeroValues = filter $ (/=0) . snd
 
-    filterZeroValues :: (Num val, Eq val) => [(key, val)] -> [(key, val)]
-    filterZeroValues = filter $ (/=0) . snd
+removeCard :: Deck -> Card -> Deck
+removeCard deck card = filterZeroValues $ map (\(c, n) -> (c, if c == card then n - 1 else n)) $ deck
 
-    processOneCard :: (Card, Count) -> DamageDistribution
-    processOneCard (card, n) = map (scaleWeight n) $ applyCard dmg card (removeCard deck card)
+drawCard :: (Probability, [Card], Deck) -> [(Probability, [Card], Deck)]
+drawCard (prob, cards, deck) =
+  map (\(c, n) -> (n % s * prob, c : cards, removeCard deck c)) deck
+  where s = sum $ map snd deck
 
-    scaleWeight :: Count -> (Damage, Rational) -> (Damage, Rational)
-    scaleWeight n (d, p) = (d, fromIntegral n * p)
+drawOneCard :: Deck -> [(Probability, [Card], Deck)]
+drawOneCard deck = [(1, [], deck)] >>= drawCard
 
-    removeCard :: Deck -> Card -> Deck
-    removeCard deck card = filter ((>0) . snd) $ map (\(c, n) -> (c, if c == card then n - 1 else n)) $ group deck
+drawTwoCards :: Deck -> [(Probability, [Card], Deck)]
+drawTwoCards deck = [(1, [], deck)] >>= drawCard >>= drawCard
 
 always :: Damage -> DamageDistribution
 always dmg = [(dmg, 1)]
 
-isRollingModifier :: Card -> Bool
-isRollingModifier = (=='r') . head
+isRolling :: Card -> Bool
+isRolling = (=='r') . head
 
-applyModifier :: Damage -> Card -> Damage
-applyModifier dmg "r+2" = dmg + 2
-applyModifier dmg "r+1" = dmg + 1
-applyModifier dmg "r+0" = dmg
-applyModifier dmg  "*2" = dmg * 2
-applyModifier dmg  "+4" = dmg + 4
-applyModifier dmg  "+3" = dmg + 3
-applyModifier dmg  "+2" = dmg + 2
-applyModifier dmg  "+1" = dmg + 1
-applyModifier dmg  "+0" = dmg
-applyModifier dmg  "-1" = dmg - 1
-applyModifier dmg  "-2" = dmg - 2
-applyModifier dmg   "0" = 0
-applyModifier dmg card = trace ("Unknown card: " ++ show card) undefined
+hasSpecialEffect :: Card -> Bool
+hasSpecialEffect = (=='*') . last
 
-applyCardNormally :: Damage -> Card -> Deck -> DamageDistribution
-applyCardNormally dmg card deck =
-  let d = applyModifier dmg card in
-  if isRollingModifier card then
-    normalAttack deck d
-  else
-    always d
+removeRolling :: Card -> Card
+removeRolling card = if isRolling card then tail card else card
 
-applyCardWithAdvantage :: Damage -> Card -> Deck -> DamageDistribution
-applyCardWithAdvantage dmg card deck =
-  if isRollingModifier card then
-    applyCardNormally dmg card deck
-  else
-    damageDistributionOfAttack (\d c _ -> always $ max (applyModifier dmg card) (applyModifier d c)) deck dmg
+removeSpecialEffect :: Card -> Card
+removeSpecialEffect card = if hasSpecialEffect card then init card else card
 
-applyCardWithDisadvantage :: Damage -> Card -> Deck -> DamageDistribution
-applyCardWithDisadvantage dmg card deck =
-  if isRollingModifier card then
-    attackWithDisadvantage deck dmg
-  else
-    let dmg' = applyModifier dmg card in
-    damageDistributionOfAttack (\d c _ -> always $ if isRollingModifier c then dmg' else min dmg' (applyModifier d c)) deck dmg
+getModifier :: Card -> Modifier
+getModifier "x2" = (*2)
+getModifier "+4" = (+4)
+getModifier "+3" = (+3)
+getModifier "+2" = (+2)
+getModifier "+1" = (+1)
+getModifier "+0" = id
+getModifier "-1" = subtract 1
+getModifier "-2" = subtract 2
+getModifier  "0" = const 0
+getModifier card = trace ("Unknown card: " ++ show card) undefined
+
+applyModifier :: Card -> Damage -> Damage
+applyModifier card = getModifier $ removeSpecialEffect $ removeRolling $ card
+
+compareCards :: Damage -> Card -> Card -> Ordering
+compareCards = compareCardsByOfficialRules
+
+compareCardsByOfficialRules :: Damage -> Card -> Card -> Ordering
+compareCardsByOfficialRules dmg lhs rhs
+  | isRolling lhs || isRolling rhs = undefined
+  | bothSpecial = EQ
+  | valueOrd == EQ = specialOrd
+  | specialOrd == EQ = valueOrd
+  | valueOrd == specialOrd = valueOrd
+  | otherwise = EQ
+  where
+    bothSpecial :: Bool
+    bothSpecial = all hasSpecialEffect [lhs, rhs]
+    specialOrd :: Ordering
+    specialOrd = compare (hasSpecialEffect lhs) (hasSpecialEffect rhs)
+    valueOrd :: Ordering
+    valueOrd = compare (applyModifier lhs dmg) (applyModifier rhs dmg)
+
+compareCardsByHomeRules :: Damage -> Card -> Card -> Ordering
+compareCardsByHomeRules dmg lhs rhs =
+  compare (applyModifier lhs dmg) (applyModifier rhs dmg)
+
+bestCard :: Damage -> Card -> Card -> Card
+bestCard dmg lhs rhs =
+  case compareCards dmg lhs rhs of
+    LT -> rhs
+    _  -> lhs
+
+worstCard :: Damage -> Card -> Card -> Card
+worstCard dmg lhs rhs =
+  case compareCards dmg lhs rhs of
+    GT -> rhs
+    _  -> lhs
 
 normalAttack :: Deck -> Damage -> DamageDistribution
-normalAttack = damageDistributionOfAttack applyCardNormally
+normalAttack deck dmg =
+  group $ concatMap applyCard $ drawOneCard $ group $ filterZeroValues $ deck
+  where
+    applyCard :: (Probability, [Card], Deck) -> DamageDistribution
+    applyCard (prob, [card], deck') = scaleProb $
+      let d = applyModifier card dmg in
+      if isRolling card then
+        normalAttack deck' d
+      else
+        always d
+      where
+        scaleProb :: DamageDistribution -> DamageDistribution
+        scaleProb = map (\(d, p) -> (d, p * prob))
 
 attackWithAdvantage :: Deck -> Damage -> DamageDistribution
-attackWithAdvantage = damageDistributionOfAttack applyCardWithAdvantage
+attackWithAdvantage deck dmg =
+  group $ concatMap applyCards $ drawTwoCards $ group $ filterZeroValues $ deck
+  where
+    applyCards :: (Probability, [Card], Deck) -> DamageDistribution
+    applyCards (prob, [c2,c1], deck') = scaleProb $
+      case liftA isRolling [c1, c2] of
+        [True, True] -> normalAttack deck' $ applyModifier c2 $ applyModifier c1 $ dmg
+        [True, False] -> always $ applyModifier c2 $ applyModifier c1 $ dmg
+        [False, True] -> always $ applyModifier c1 $ applyModifier c2 $ dmg
+        [False, False] -> always $ applyModifier (bestCard dmg c1 c2) dmg
+      where
+        scaleProb :: DamageDistribution -> DamageDistribution
+        scaleProb = map (\(d, p) -> (d, p * prob))
 
 attackWithDisadvantage :: Deck -> Damage -> DamageDistribution
-attackWithDisadvantage = damageDistributionOfAttack applyCardWithDisadvantage
+attackWithDisadvantage deck dmg =
+  group $ concatMap applyCards $ drawTwoCards $ group $ filterZeroValues $ deck
+  where
+    applyCards :: (Probability, [Card], Deck) -> DamageDistribution
+    applyCards (prob, [c2,c1], deck') = scaleProb $
+      case liftA isRolling [c1, c2] of
+        [True, True] -> normalAttack (filter (not . isRolling . fst) deck') dmg
+        [True, False] -> always $ applyModifier c2 dmg
+        [False, True] -> always $ applyModifier c1 dmg
+        [False, False] -> always $ applyModifier (worstCard dmg c1 c2) dmg
+      where
+        scaleProb :: DamageDistribution -> DamageDistribution
+        scaleProb = map (\(d, p) -> (d, p * prob))
 
 meanAndVariance :: DamageDistribution -> (Float, Float)
 meanAndVariance distrib =
   (mean, var)
   where
     (m, m2) = foldr folder (0,0) distrib
-    folder :: (Damage, Rational) -> (Rational, Rational) -> (Rational, Rational)
+    folder :: (Damage, Probability) -> (Rational, Rational) -> (Rational, Rational)
     folder (d,p) (m,m2) = (m + fromIntegral d * p, m2 + fromIntegral d ^ 2 * p)
     mean = fromRational m
     var = fromRational $ m2 - m ^ 2
@@ -111,108 +168,142 @@ printDeckStats deck baseDmg = do
 
 baseDeck :: Deck
 baseDeck = [
-  ( "*2", 1),
-  ( "+2", 1),
-  ( "+1", 5),
-  ( "+0", 6),
-  ( "-1", 5),
-  ( "-2", 1),
-  (  "0", 1)]
+  ( "x2" , 1),
+  ( "+2" , 1),
+  ( "+1" , 5),
+  ( "+0" , 6),
+  ( "-1" , 5),
+  ( "-2" , 1),
+  (  "0" , 1)]
 
 bruteDeck = [
-  ( "*2", 1),
-  ( "+3", 1),
-  ( "+2", 1),
-  ( "+1", 11),
-  ( "+0", 6),
-  ( "-1", 3),
-  ( "-2", 1),
-  (  "0", 1)]
+  ("r+0*", 14),
+  ( "x2" , 1),
+  ( "+3" , 1),
+  ( "+2" , 1),
+  ( "+1*", 1),
+  ( "+1" , 11),
+  ( "+0" , 6),
+  ( "-1" , 2),
+  ( "-2" , 1),
+  (  "0" , 1)]
 
 tinkererDeck = [
-  ( "*2", 1),
-  ( "+3", 1),
-  ( "+2", 1),
-  ( "+1", 13),
-  ( "+0", 8),
-  ( "-1", 1),
-  ( "-2", 0),
-  (  "0", 1)]
+  ("r+0*", 5),
+  ( "x2" , 1),
+  ( "+3" , 1),
+  ( "+2" , 1),
+  ( "+1*", 6),
+  ( "+1" , 7),
+  ( "+0*", 1),
+  ( "+0" , 7),
+  ( "-1" , 1),
+  ( "-2" , 0),
+  (  "0" , 1)]
 
 spellweaverDeck = [
-  ( "*2", 1),
-  ( "+2", 5),
-  ( "+1", 14),
-  ( "+0", 3),
-  ( "-1", 3),
-  ( "-2", 1),
-  (  "0", 1)]
+  ("r+0*", 4),
+  ( "x2" , 1),
+  ( "+2*", 4),
+  ( "+2" , 1),
+  ( "+1*", 3),
+  ( "+1" , 11),
+  ( "+0*", 1),
+  ( "+0" , 2),
+  ( "-1" , 3),
+  ( "-2" , 1),
+  (  "0" , 1)]
 
 scoundrelDeck = [
-  ( "*2", 1),
-  ( "+2", 3),
-  ( "+1", 6),
-  ( "+0", 1),
-  ( "-1", 0),
-  ( "-2", 0),
-  (  "0", 1)]
+  ("r+1" , 4),
+  ("r+0*", 9),
+  ( "x2" , 1),
+  ( "+2" , 3),
+  ( "+1" , 6),
+  ( "+0" , 1),
+  ( "-1" , 0),
+  ( "-2" , 0),
+  (  "0" , 1)]
 
 cragheartDeck = [
-  ( "*2", 1),
-  ( "+2", 5),
-  ( "+1", 10),
-  ( "+0", 2),
-  ( "-1", 2),
-  ( "-2", 2),
-  (  "0", 1)]
+  ("r+0*", 8),
+  ( "x2" , 1),
+  ( "+2*", 2),
+  ( "+2" , 3),
+  ( "+1*", 2),
+  ( "+1" , 8),
+  ( "+0" , 2),
+  ( "-1" , 2),
+  ( "-2" , 2),
+  (  "0" , 1)]
 
 mindthiefDeck = [
-  ( "*2", 1),
-  ( "+2", 5),
-  ( "+1", 3),
-  ( "+0", 3),
-  ( "-1", 1),
-  ( "-2", 0),
-  (  "0", 1)]
+  ("r+1" , 4),
+  ("r+0*", 11),
+  ( "x2" , 1),
+  ( "+2*", 2),
+  ( "+2" , 3),
+  ( "+1" , 3),
+  ( "+0" , 3),
+  ( "-1" , 1),
+  ( "-2" , 0),
+  (  "0" , 1)]
 
 sunkeeperDeck = [
-  ( "*2", 1),
-  ( "+2", 2),
-  ( "+1", 7),
-  ( "+0", 2),
-  ( "-1", 1),
-  ( "-2", 0),
-  (  "0", 1)]
+  ("r+1" , 4),
+  ("r+0*", 15),
+  ( "x2" , 1),
+  ( "+2" , 2),
+  ( "+1" , 7),
+  ( "+0" , 2),
+  ( "-1" , 1),
+  ( "-2" , 0),
+  (  "0" , 1)]
+
+summonerDeck = [
+  ("r+0*", 14),
+  ( "x2" , 1),
+  ( "+2" , 3),
+  ( "+1" , 10),
+  ( "+0" , 7),
+  ( "-1" , 0),
+  ( "-2" , 0),
+  (  "0" , 1)]
+
+removeRollingFromDeck :: Deck -> Deck
+removeRollingFromDeck = filter $ not . isRolling . fst
+
+removeRollingPlusZeroFromDeck :: Deck -> Deck
+removeRollingPlusZeroFromDeck = filter $ (/="r+0*") . fst
+
+printDeckVariantStats :: String -> Deck -> Damage -> IO ()
+printDeckVariantStats name deck baseDmg = do
+  printf "%s Deck - without rolling modifiers\n" name
+  printDeckStats (removeRollingFromDeck deck) baseDmg
+  putChar '\n'
+  printf "%s Deck - without rolling +0\n" name
+  printDeckStats (removeRollingPlusZeroFromDeck deck) baseDmg
+  putChar '\n'
+  printf "%s Deck - full\n" name
+  printDeckStats deck baseDmg
+  putChar '\n'
 
 printAllDeckStats :: Damage -> IO ()
 printAllDeckStats baseDmg = do
   putStrLn "Base Deck"
   printDeckStats baseDeck baseDmg
   putChar '\n'
-  putStrLn "Brute Deck"
-  printDeckStats bruteDeck baseDmg
-  putChar '\n'
-  putStrLn "Tinkerer Deck"
-  printDeckStats tinkererDeck baseDmg
-  putChar '\n'
-  putStrLn "Spellweaver Deck"
-  printDeckStats spellweaverDeck baseDmg
-  putChar '\n'
-  putStrLn "Scoundrel Deck"
-  printDeckStats scoundrelDeck baseDmg
-  putChar '\n'
-  putStrLn "Cragheart Deck"
-  printDeckStats cragheartDeck baseDmg
-  putChar '\n'
-  putStrLn "Mindthief Deck"
-  printDeckStats mindthiefDeck baseDmg
-  putChar '\n'
-  putStrLn "Sunkeeper Deck"
-  printDeckStats sunkeeperDeck baseDmg
-  putChar '\n'
+  printDeckVariantStats "Brute" bruteDeck baseDmg
+  printDeckVariantStats "Tinkerer" tinkererDeck baseDmg
+  printDeckVariantStats "Spellweaver" spellweaverDeck baseDmg
+  printDeckVariantStats "Scoundrel" scoundrelDeck baseDmg
+  printDeckVariantStats "Cragheart" cragheartDeck baseDmg
+  printDeckVariantStats "Mindthief" mindthiefDeck baseDmg
+  printDeckVariantStats "Sunkeeper" sunkeeperDeck baseDmg
+  printDeckVariantStats "Summoner" summonerDeck baseDmg
 
 cragheartDeck0 = [
-  ( "*2", 1),
+  ( "x2", 1),
   ( "+2", 3),
   ( "+1", 8),
   ( "+0", 2),
@@ -221,7 +312,7 @@ cragheartDeck0 = [
   (  "0", 1)]
 
 cragheartDeck1 = [
-  ( "*2", 1),
+  ( "x2", 1),
   ( "+2", 5),
   ( "+1", 8),
   ( "+0", 2),
@@ -230,7 +321,7 @@ cragheartDeck1 = [
   (  "0", 1)]
 
 cragheartDeck2 = [
-  ( "*2", 1),
+  ( "x2", 1),
   ( "+2", 3),
   ( "+1", 9),
   ( "+0", 2),
@@ -239,7 +330,7 @@ cragheartDeck2 = [
   (  "0", 1)]
 
 cragheartDeck3 = [
-  ( "*2", 1),
+  ( "x2", 1),
   ( "+2", 5),
   ( "+1", 9),
   ( "+0", 2),
@@ -248,7 +339,7 @@ cragheartDeck3 = [
   (  "0", 1)]
 
 cragheartDeck4 = [
-  ( "*2", 1),
+  ( "x2", 1),
   ( "+2", 3),
   ( "+1", 10),
   ( "+0", 2),
@@ -257,7 +348,7 @@ cragheartDeck4 = [
   (  "0", 1)]
 
 cragheartDeck5 = [
-  ( "*2", 1),
+  ( "x2", 1),
   ( "+2", 5),
   ( "+1", 10),
   ( "+0", 2),
@@ -295,7 +386,7 @@ testDeck0 = [
   ( "+2", 0),
   ( "+1", 0),
 
-  ( "*2", 1),
+  ( "x2", 1),
   ( "+2", 1),
   ( "+1", 5),
   ( "+0", 7),
@@ -312,7 +403,7 @@ testDeck1 = [
   ( "+2", 0),
   ( "+1", 0),
 
-  ( "*2", 1),
+  ( "x2", 1),
   ( "+2", 1),
   ( "+1", 5),
   ( "+0", 6),
