@@ -1,4 +1,4 @@
-module GloomhavenModDeck where
+module Main where
 
 import Prelude hiding (Left, Right)
 import Control.Applicative (liftA)
