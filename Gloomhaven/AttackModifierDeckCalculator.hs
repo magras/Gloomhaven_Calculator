@@ -1,9 +1,9 @@
 module Gloomhaven.AttackModifierDeckCalculator where
 
 import Control.Applicative (liftA)
-import Debug.Trace (trace, traceShow, traceShowId)
 import Data.Ratio ((%))
 import Data.List (sort)
+import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 
 type Count = Integer
@@ -11,24 +11,22 @@ type Damage = Integer
 type Probability = Rational
 type Card = String
 type Modifier = Damage -> Damage
-type Deck = [(Card, Count)]
-type DamageDistribution = [(Damage, Probability)]
+type Deck = Map Card Count
+type DamageDistribution = Map Damage Probability
+type KillChanceTable = Map (AttackType, Damage, Damage) Probability
 
-data AttackType = Normal | Advantage | Disadvantage deriving (Eq, Show)
+data AttackType = Normal | Advantage | Disadvantage deriving (Eq, Ord, Show)
 
-group :: (Ord key, Num val) => [(key, val)] -> [(key, val)]
-group = Map.toList . Map.fromListWith (+)
+filterZeroValues :: (Num v, Eq v) => Map k v -> Map k v
+filterZeroValues = Map.filter (/=0)
 
-filterZeroValues :: (Num val, Eq val) => [(key, val)] -> [(key, val)]
-filterZeroValues = filter $ (/=0) . snd
-
-removeCard :: Deck -> Card -> Deck
-removeCard deck card = filterZeroValues $ map (\(c, n) -> (c, if c == card then n - 1 else n)) $ deck
+removeCard :: Card -> Deck -> Deck
+removeCard = Map.update (\n -> if n > 0 then Just (n - 1) else Nothing)
 
 drawCard :: (Probability, [Card], Deck) -> [(Probability, [Card], Deck)]
 drawCard (prob, cards, deck) =
-  map (\(c, n) -> (n % s * prob, c : cards, removeCard deck c)) deck
-  where s = sum $ map snd deck
+  Map.foldMapWithKey (\c n -> [(n % s * prob, c : cards, removeCard c deck)]) deck
+  where s = Map.foldl' (+) 0 deck
 
 drawOneCard :: Deck -> [(Probability, [Card], Deck)]
 drawOneCard deck = [(1, [], deck)] >>= drawCard
@@ -37,7 +35,7 @@ drawTwoCards :: Deck -> [(Probability, [Card], Deck)]
 drawTwoCards deck = [(1, [], deck)] >>= drawCard >>= drawCard
 
 always :: Damage -> DamageDistribution
-always dmg = [(dmg, 1)]
+always dmg = Map.singleton dmg 1
 
 isRolling :: Card -> Bool
 isRolling = (=='r') . head
@@ -61,7 +59,7 @@ getModifier "+0" = id
 getModifier "-1" = subtract 1
 getModifier "-2" = subtract 2
 getModifier  "0" = const 0
-getModifier card = trace ("Unknown card: " ++ show card) undefined
+getModifier card = error ("Unknown card: " ++ show card)
 
 applyModifier :: Card -> Damage -> Damage
 applyModifier card = max 0 . modifier
@@ -102,59 +100,71 @@ worstCard dmg lhs rhs =
     GT -> rhs
     _  -> lhs
 
+removeRollingFromDeck :: Deck -> Deck
+removeRollingFromDeck = Map.filterWithKey (\card _ -> not $ isRolling card)
+
 attack :: AttackType -> Deck -> Damage -> DamageDistribution
 attack Normal deck dmg =
-  group $ concatMap applyCard $ drawOneCard $ group $ filterZeroValues $ deck
+  foldr (Map.unionWith (+)) Map.empty $ map applyCard $ drawOneCard $ filterZeroValues $ deck
   where
     applyCard :: (Probability, [Card], Deck) -> DamageDistribution
-    applyCard (prob, [card], deck') = scaleProb $
+    applyCard (prob, [card], deck') = Map.map (*prob) $
       let d = applyModifier card dmg in
       if isRolling card then
         attack Normal deck' d
       else
         always d
-      where
-        scaleProb :: DamageDistribution -> DamageDistribution
-        scaleProb = map (\(d, p) -> (d, p * prob))
 
 attack Advantage deck dmg =
-  group $ concatMap applyCards $ drawTwoCards $ group $ filterZeroValues $ deck
+  foldr (Map.unionWith (+)) Map.empty $ map applyCards $ drawTwoCards $ filterZeroValues $ deck
   where
     applyCards :: (Probability, [Card], Deck) -> DamageDistribution
-    applyCards (prob, [c2,c1], deck') = scaleProb $
+    applyCards (prob, [c2,c1], deck') = Map.map (*prob) $
       case liftA isRolling [c1, c2] of
         [True, True] -> attack Normal deck' $ applyModifier c2 $ applyModifier c1 $ dmg
         [True, False] -> always $ applyModifier c2 $ applyModifier c1 $ dmg
         [False, True] -> always $ applyModifier c1 $ applyModifier c2 $ dmg
         [False, False] -> always $ applyModifier (bestCard dmg c1 c2) dmg
-      where
-        scaleProb :: DamageDistribution -> DamageDistribution
-        scaleProb = map (\(d, p) -> (d, p * prob))
 
 attack Disadvantage deck dmg =
-  group $ concatMap applyCards $ drawTwoCards $ group $ filterZeroValues $ deck
+  foldr (Map.unionWith (+)) Map.empty $ map applyCards $ drawTwoCards $ filterZeroValues $ deck
   where
     applyCards :: (Probability, [Card], Deck) -> DamageDistribution
-    applyCards (prob, [c2,c1], deck') = scaleProb $
+    applyCards (prob, [c2,c1], deck') = Map.map (*prob) $
       case liftA isRolling [c1, c2] of
-        [True, True] -> attack Normal (filter (not . isRolling . fst) deck') dmg
+        [True, True] -> attack Normal (removeRollingFromDeck deck') dmg
         [True, False] -> always $ applyModifier c2 dmg
         [False, True] -> always $ applyModifier c1 dmg
         [False, False] -> always $ applyModifier (worstCard dmg c1 c2) dmg
-      where
-        scaleProb :: DamageDistribution -> DamageDistribution
-        scaleProb = map (\(d, p) -> (d, p * prob))
 
 meanAndVariance :: DamageDistribution -> (Float, Float)
 meanAndVariance distrib =
   (mean, var)
   where
-    (m, m2) = foldr folder (0,0) distrib
-    folder :: (Damage, Probability) -> (Rational, Rational) -> (Rational, Rational)
-    folder (d,p) (m,m2) = (m + fromIntegral d * p, m2 + fromIntegral d ^ 2 * p)
+    (m, m2) = Map.foldrWithKey folder (0,0) distrib
+    folder :: Damage -> Probability -> (Rational, Rational) -> (Rational, Rational)
+    folder d p (m,m2) = (m + fromIntegral d * p, m2 + fromIntegral d ^ 2 * p)
     mean = fromRational m
     var = fromRational $ m2 - m ^ 2
 
 tailDistribution :: DamageDistribution -> DamageDistribution
 tailDistribution =
-  scanr1 (\(d,p) (_,prob) -> (d, p + prob)) . sort
+  snd . Map.mapAccumRWithKey (\prob _ p -> (prob + p, prob + p)) 0
+
+killChanceTable :: Deck -> [Damage] -> KillChanceTable
+killChanceTable deck baseDmgRange =
+  foldr1 Map.union [killChances deck baseDmg atkType | baseDmg <- baseDmgRange, atkType <- [Normal, Advantage, Disadvantage]]
+  where
+    killChances :: Deck -> Damage -> AttackType -> KillChanceTable
+    killChances deck baseDmg atkType =
+      Map.mapKeysMonotonic (\resultDmg -> (atkType, baseDmg, resultDmg)) $
+        tailDistribution $ (attack atkType) deck baseDmg
+
+killChance :: KillChanceTable -> AttackType -> Damage -> Damage -> Maybe Probability
+killChance dict atkType baseDmg resultDmg =
+  maximumMaybe $ Map.filterWithKey (\(atk, bd, rd) _ -> atk == atkType && bd == baseDmg && rd >= resultDmg) dict
+
+maximumMaybe :: (Foldable t, Ord a) => t a -> Maybe a
+maximumMaybe xs
+  | null xs = Nothing
+  | otherwise = Just $ maximum xs

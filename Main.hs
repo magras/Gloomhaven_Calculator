@@ -2,16 +2,17 @@ module Main where
 
 import Gloomhaven.AttackModifierDeckCalculator
 import Prelude hiding (Left, Right)
-import Data.Aeson
+import Data.Aeson (decode)
 import Data.ByteString.Lazy (ByteString, getContents)
-import Data.List (nub, sort, intercalate)
+import Data.List (intercalate)
 import qualified Data.Map.Strict as Map
+import Data.Maybe (fromJust)
 import Text.Printf (printf)
 
 data Alignment = Left | Right | Center
 
 baseDeck :: Deck
-baseDeck = [
+baseDeck = Map.fromList [
   ( "x2" , 1),
   ( "+2" , 1),
   ( "+1" , 5),
@@ -20,7 +21,7 @@ baseDeck = [
   ( "-2" , 1),
   (  "0" , 1)]
 
-bruteDeck = [
+bruteDeck = Map.fromList [
   ("r+0*", 14),
   ( "x2" , 1),
   ( "+3" , 1),
@@ -32,7 +33,7 @@ bruteDeck = [
   ( "-2" , 1),
   (  "0" , 1)]
 
-tinkererDeck = [
+tinkererDeck = Map.fromList [
   ("r+0*", 5),
   ( "x2" , 1),
   ( "+3" , 1),
@@ -45,7 +46,7 @@ tinkererDeck = [
   ( "-2" , 0),
   (  "0" , 1)]
 
-spellweaverDeck = [
+spellweaverDeck = Map.fromList [
   ("r+0*", 4),
   ( "x2" , 1),
   ( "+2*", 4),
@@ -58,7 +59,7 @@ spellweaverDeck = [
   ( "-2" , 1),
   (  "0" , 1)]
 
-scoundrelDeck = [
+scoundrelDeck = Map.fromList [
   ("r+1" , 4),
   ("r+0*", 9),
   ( "x2" , 1),
@@ -69,7 +70,7 @@ scoundrelDeck = [
   ( "-2" , 0),
   (  "0" , 1)]
 
-cragheartDeck = [
+cragheartDeck = Map.fromList [
   ("r+0*", 8),
   ( "x2" , 1),
   ( "+2*", 2),
@@ -81,7 +82,7 @@ cragheartDeck = [
   ( "-2" , 2),
   (  "0" , 1)]
 
-mindthiefDeck = [
+mindthiefDeck = Map.fromList [
   ("r+1" , 4),
   ("r+0*", 11),
   ( "x2" , 1),
@@ -93,7 +94,7 @@ mindthiefDeck = [
   ( "-2" , 0),
   (  "0" , 1)]
 
-sunkeeperDeck = [
+sunkeeperDeck = Map.fromList [
   ("r+1" , 4),
   ("r+0*", 15),
   ( "x2" , 1),
@@ -104,7 +105,7 @@ sunkeeperDeck = [
   ( "-2" , 0),
   (  "0" , 1)]
 
-summonerDeck = [
+summonerDeck = Map.fromList [
   ("r+0*", 14),
   ( "x2" , 1),
   ( "+2" , 3),
@@ -114,11 +115,8 @@ summonerDeck = [
   ( "-2" , 0),
   (  "0" , 1)]
 
-removeRollingFromDeck :: Deck -> Deck
-removeRollingFromDeck = filter $ not . isRolling . fst
-
 removeRollingPlusZeroFromDeck :: Deck -> Deck
-removeRollingPlusZeroFromDeck = filter $ (/="r+0*") . fst
+removeRollingPlusZeroFromDeck = Map.filterWithKey (\card _ -> card /= "r+0*")
 
 printDeckStats :: Deck -> Damage -> IO ()
 printDeckStats deck baseDmg = do
@@ -156,7 +154,7 @@ printAllDeckStats baseDmg = do
   printDeckVariantStats "Sunkeeper" sunkeeperDeck baseDmg
   printDeckVariantStats "Summoner" summonerDeck baseDmg
 
-cragheartDeck0 = [
+cragheartDeck0 = Map.fromList [
   ( "x2" , 1),
   ( "+2*", 2),
   ( "+2" , 1),
@@ -167,7 +165,7 @@ cragheartDeck0 = [
   ( "-2" , 1),
   (  "0" , 1)]
 
-cragheartDeck1 = [
+cragheartDeck1 = Map.fromList [
   ( "x2" , 1),
   ( "+2*", 2),
   ( "+2" , 3),
@@ -178,7 +176,7 @@ cragheartDeck1 = [
   ( "-2" , 2),
   (  "0" , 1)]
 
-cragheartDeck2 = [
+cragheartDeck2 = Map.fromList [
   ( "x2" , 1),
   ( "+2*", 2),
   ( "+2" , 1),
@@ -189,7 +187,7 @@ cragheartDeck2 = [
   ( "-2" , 1),
   (  "0" , 1)]
 
-cragheartDeck3 = [
+cragheartDeck3 = Map.fromList [
   ( "x2" , 1),
   ( "+2*", 2),
   ( "+2" , 3),
@@ -200,7 +198,7 @@ cragheartDeck3 = [
   ( "-2" , 2),
   (  "0" , 1)]
 
-cragheartDeck4 = [
+cragheartDeck4 = Map.fromList [
   ( "x2" , 1),
   ( "+2*", 2),
   ( "+2" , 1),
@@ -211,7 +209,7 @@ cragheartDeck4 = [
   ( "-2" , 1),
   (  "0" , 1)]
 
-cragheartDeck5 = [
+cragheartDeck5 = Map.fromList [
   ( "x2" , 1),
   ( "+2*", 2),
   ( "+2" , 3),
@@ -243,32 +241,16 @@ printCragheartDeckVariantStats baseDmg = do
   printDeckStats cragheartDeck5 baseDmg
   putChar '\n'
 
-killChanceTable :: Deck -> [Damage] -> [(AttackType, Damage, Damage, Probability)]
-killChanceTable deck baseDmgRange =
-  concat [killChances deck baseDmg atkType | baseDmg <- baseDmgRange, atkType <- [Normal, Advantage, Disadvantage]]
-  where
-    killChances :: Deck -> Damage -> AttackType -> [(AttackType, Damage, Damage, Probability)]
-    killChances deck baseDmg atkType =
-      map (\(resultDmg, prob) -> (atkType, baseDmg, resultDmg, prob)) $
-        tailDistribution $ (attack atkType) deck baseDmg
-
 printKillChanceTable :: Deck -> [Damage] -> IO ()
 printKillChanceTable deck baseDmgRange = do
   putStrLn $ text
   where
-    dict :: [((AttackType, Damage, Damage), Probability)]
-    dict =
-      map (\(atk, bd, rd, p) -> ((atk,bd,rd),p)) $
-        killChanceTable deck baseDmgRange
-
-    killChance :: AttackType -> Damage -> Damage -> Maybe Probability
-    killChance atkType baseDmg resultDmg =
-      maximumMaybe $ map snd $
-        filter (\((atk, bd, rd), _) -> atk == atkType && bd == baseDmg && rd >= resultDmg) dict
+    dict :: KillChanceTable
+    dict = killChanceTable deck baseDmgRange
 
     table :: [[[Maybe Probability]]]
-    table = [[[killChance atkType baseDmg resultDmg
-      | atkType <- [Disadvantage, Normal, Advantage]]
+    table = [[[killChance dict atkType baseDmg resultDmg
+      | atkType <- [Normal, Advantage, Disadvantage]]
       | baseDmg <- baseDmgRange]
       | resultDmg <- resultDmgRange]
     
@@ -301,13 +283,8 @@ printKillChanceTable deck baseDmgRange = do
     toPercent = fromRational . (*100)
 
     resultDmgRange :: [Damage]
-    -- resultDmgRange = nub $ sort $ filter (/=0) $ map (\((_, _, resultDmg), _) -> resultDmg) dict
-    resultDmgRange = let max = maximum $ map (\((_, _, resultDmg), _) -> resultDmg) dict in [1..max]
-
-    maximumMaybe :: (Foldable t, Ord a) => t a -> Maybe a
-    maximumMaybe xs
-      | null xs = Nothing
-      | otherwise = Just $ maximum xs
+    resultDmgRange = [1..max]
+      where max = maximum $ Map.foldMapWithKey (\(_, _, d) _ -> [d]) dict
 
     alignText :: Alignment -> Int -> String -> String
     alignText algn width str = left ++ str ++ right
@@ -331,9 +308,7 @@ printKillChanceTable deck baseDmgRange = do
     alignCenter = alignText Center
 
 parseDeck :: ByteString -> Deck
-parseDeck str = case decode str of
-  Just m -> Map.toList m
-  Nothing -> error "Can't parse deck"
+parseDeck = fromJust . decode
 
 main :: IO ()
 main = do
