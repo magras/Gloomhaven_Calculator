@@ -15,9 +15,12 @@ cabal-version:       >=1.10
 
 executable Gloomhaven-Calculator
   default-language:    Haskell2010
-  main-is:             moddeck.hs
+  main-is:             Main.hs
+  other-modules:
+    Gloomhaven.AttackModifierDeckCalculator
 
   build-depends:
     aeson >=1.4 && <1.5,
     base >=4.11 && <4.12,
+    bytestring,
     containers
