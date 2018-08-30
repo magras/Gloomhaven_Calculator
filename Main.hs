@@ -250,7 +250,7 @@ printKillChanceTable deck baseDmgRange = do
 
     table :: [[[Maybe Probability]]]
     table = [[[killChance dict atkType baseDmg resultDmg
-      | atkType <- [Normal, Advantage, Disadvantage]]
+      | atkType <- [Disadvantage, Normal, Advantage]]
       | baseDmg <- baseDmgRange]
       | resultDmg <- resultDmgRange]
     
