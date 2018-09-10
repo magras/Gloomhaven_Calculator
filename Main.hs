@@ -100,8 +100,8 @@ parseDeck = fromJust . decode
 
 validateDeck :: Deck -> Deck
 validateDeck deck
-  | sum deck < 2  = error "The deck contains less than two cards."
   | any (<0) deck = error "The deck contains a card with a negative count."
+  | sum deck < 2  = error "The deck contains less than two cards."
   | otherwise     = filterZeroValues deck
   where
     filterZeroValues = Map.filter (/=0)
