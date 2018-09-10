@@ -3,7 +3,8 @@ module Main where
 import Gloomhaven.AttackModifierDeckCalculator
 import Prelude hiding (Left, Right)
 import Data.Aeson (decode)
-import Data.ByteString.Lazy (ByteString, getContents)
+import Data.ByteString.Lazy (ByteString)
+import qualified Data.ByteString.Lazy as ByteString
 import Data.List (intercalate)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (fromJust)
@@ -334,7 +335,7 @@ main = do
   -- printTestDeckStats baseDmg
   -- printPartyKillChanceTables baseDmgRange
 
-  contents <- Data.ByteString.Lazy.getContents
+  contents <- ByteString.getContents
   let deck = parseDeck contents
 
   printKillChanceTable deck baseDmgRange
