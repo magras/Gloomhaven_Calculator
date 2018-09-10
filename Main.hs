@@ -98,11 +98,19 @@ printKillChanceTable deck baseDmgRange = do
 parseDeck :: ByteString -> Deck
 parseDeck = fromJust . decode
 
+validateDeck :: Deck -> Deck
+validateDeck deck
+  | sum deck < 2  = error "The deck contains less than two cards."
+  | any (<0) deck = error "The deck contains a card with a negative count."
+  | otherwise     = filterZeroValues deck
+  where
+    filterZeroValues = Map.filter (/=0)
+
 main :: IO ()
 main = do
 
   contents <- ByteString.getContents
-  let deck = parseDeck contents
+  let deck = validateDeck $ parseDeck contents
 
   printKillChanceTable deck baseDmgRange
 
