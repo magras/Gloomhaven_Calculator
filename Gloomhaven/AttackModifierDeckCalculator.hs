@@ -18,9 +18,6 @@ type KillChanceTable = Map (AttackType, Damage) DamageDistribution
 
 data AttackType = Normal | Advantage | Disadvantage deriving (Eq, Ord, Show)
 
-filterZeroValues :: (Num v, Eq v) => Map k v -> Map k v
-filterZeroValues = Map.filter (/=0)
-
 removeCard :: Card -> Deck -> Deck
 removeCard = Map.update (\n -> if n > 1 then Just (n - 1) else Nothing)
 
@@ -99,7 +96,7 @@ removeRollingFromDeck = Map.filterWithKey (\card _ -> not $ isRolling card)
 
 attack :: AttackType -> Deck -> Damage -> DamageDistribution
 attack Normal deck dmg =
-  foldr (Map.unionWith (+)) Map.empty $ map applyCard $ drawOneCard $ filterZeroValues $ deck
+  foldr (Map.unionWith (+)) Map.empty $ map applyCard $ drawOneCard $ deck
   where
     applyCard :: (Probability, [Card], Deck) -> DamageDistribution
     applyCard (prob, [card], deck') = Map.map (*prob) $
@@ -110,7 +107,7 @@ attack Normal deck dmg =
         always d
 
 attack Advantage deck dmg =
-  foldr (Map.unionWith (+)) Map.empty $ map applyCards $ drawTwoCards $ filterZeroValues $ deck
+  foldr (Map.unionWith (+)) Map.empty $ map applyCards $ drawTwoCards $ deck
   where
     applyCards :: (Probability, [Card], Deck) -> DamageDistribution
     applyCards (prob, [c2,c1], deck') = Map.map (*prob) $
@@ -121,7 +118,7 @@ attack Advantage deck dmg =
         [False, False] -> always $ applyModifier (bestCard dmg c1 c2) dmg
 
 attack Disadvantage deck dmg =
-  foldr (Map.unionWith (+)) Map.empty $ map applyCards $ drawTwoCards $ filterZeroValues $ deck
+  foldr (Map.unionWith (+)) Map.empty $ map applyCards $ drawTwoCards $ deck
   where
     applyCards :: (Probability, [Card], Deck) -> DamageDistribution
     applyCards (prob, [c2,c1], deck') = Map.map (*prob) $
