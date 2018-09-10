@@ -264,16 +264,30 @@ printKillChanceTable deck baseDmgRange = do
         formatter = intercalate " / " . map showMaybeProbability
 
     textTableWithHeaders :: [[String]]
-    textTableWithHeaders = addFirstColumn $ addHeader $ textTable
+    textTableWithHeaders = addHeader $ addStats $ addResultDmgColumn $ textTable
 
     text :: String
     text = intercalate "\n" $ map (intercalate " | ") $ textTableWithHeaders
 
     addHeader :: [[String]] -> [[String]]
-    addHeader tbl = map (alignCenter 24 . show) baseDmgRange : tbl
+    addHeader tbl = ("  " : map (alignCenter 24 . show) baseDmgRange) : tbl
 
-    addFirstColumn :: [[String]] -> [[String]]
-    addFirstColumn = zipWith (:) (map (alignRight 2) $ "" : map show resultDmgRange)
+    addStats :: [[String]] -> [[String]]
+    addStats tbl = -- tbl
+      (" E" : [printf "%6.2f / %6.2f / %6.2f" (expected (Disadvantage, baseDmg)) (expected (Normal, baseDmg)) (expected (Advantage, baseDmg)) | baseDmg <- baseDmgRange]) :
+      (" s" {- σ -} : [printf "%6.2f / %6.2f / %6.2f" (sigma (Disadvantage, baseDmg)) (sigma (Normal, baseDmg)) (sigma (Advantage, baseDmg)) | baseDmg <- baseDmgRange]) :
+      (" d" {- Δ -} : [printf "%+6.2f / %+6.2f / %+6.2f" (delta (Disadvantage, baseDmg)) (delta (Normal, baseDmg)) (delta (Advantage, baseDmg)) | baseDmg <- baseDmgRange]) :
+      tbl
+      where
+        stats = buildMeanAndVarianceTable distr
+        expected = fst . (stats Map.!)
+        sigma = sqrt . snd . (stats Map.!)
+        delta key@(Normal, baseDmg) = expected key - fromIntegral baseDmg
+        delta key@(Advantage, baseDmg) = expected key - expected (Normal, baseDmg)
+        delta key@(Disadvantage, baseDmg) = expected key - expected (Normal, baseDmg)
+
+    addResultDmgColumn :: [[String]] -> [[String]]
+    addResultDmgColumn = zipWith (:) (map (alignRight 2) $ map show resultDmgRange)
 
     showMaybeProbability :: Maybe Probability -> String
     showMaybeProbability (Just p) = showProbability p
@@ -323,8 +337,6 @@ main = do
   contents <- Data.ByteString.Lazy.getContents
   let deck = parseDeck contents
 
-  printDeckStats deck baseDmg
-  putChar '\n'
   printKillChanceTable deck baseDmgRange
 
   where
