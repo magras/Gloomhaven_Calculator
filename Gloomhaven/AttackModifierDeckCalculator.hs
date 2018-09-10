@@ -67,10 +67,7 @@ applyModifier card = max 0 . modifier
   where modifier = getModifier $ removeSpecialEffect $ removeRolling $ card
 
 compareCards :: Damage -> Card -> Card -> Ordering
-compareCards = compareCardsByOfficialRules
-
-compareCardsByOfficialRules :: Damage -> Card -> Card -> Ordering
-compareCardsByOfficialRules dmg lhs rhs
+compareCards dmg lhs rhs
   | isRolling lhs || isRolling rhs = undefined
   | bothSpecial = EQ
   | valueOrd == EQ = specialOrd
@@ -84,10 +81,6 @@ compareCardsByOfficialRules dmg lhs rhs
     specialOrd = compare (hasSpecialEffect lhs) (hasSpecialEffect rhs)
     valueOrd :: Ordering
     valueOrd = compare (applyModifier lhs dmg) (applyModifier rhs dmg)
-
-compareCardsByHomeRules :: Damage -> Card -> Card -> Ordering
-compareCardsByHomeRules dmg lhs rhs =
-  compare (applyModifier lhs dmg) (applyModifier rhs dmg)
 
 bestCard :: Damage -> Card -> Card -> Card
 bestCard dmg lhs rhs =
