@@ -13,7 +13,8 @@ type Card = String
 type Modifier = Damage -> Damage
 type Deck = Map Card Count
 type DamageDistribution = Map Damage Probability
-type KillChanceTable = Map (AttackType, Damage, Damage) Probability
+type DamageDistributionTable = Map (AttackType, Damage) DamageDistribution
+type KillChanceTable = Map (AttackType, Damage) DamageDistribution
 
 data AttackType = Normal | Advantage | Disadvantage deriving (Eq, Ord, Show)
 
@@ -147,24 +148,21 @@ meanAndVariance distrib =
     mean = fromRational m
     var = fromRational $ m2 - m ^ 2
 
-tailDistribution :: DamageDistribution -> DamageDistribution
+tailDistribution :: Map k Probability -> Map k Probability
 tailDistribution =
   snd . Map.mapAccumRWithKey (\prob _ p -> (prob + p, prob + p)) 0
 
-killChanceTable :: Deck -> [Damage] -> KillChanceTable
-killChanceTable deck baseDmgRange =
-  foldr1 Map.union [killChances deck baseDmg atkType | baseDmg <- baseDmgRange, atkType <- [Normal, Advantage, Disadvantage]]
-  where
-    killChances :: Deck -> Damage -> AttackType -> KillChanceTable
-    killChances deck baseDmg atkType =
-      Map.mapKeysMonotonic (\resultDmg -> (atkType, baseDmg, resultDmg)) $
-        tailDistribution $ (attack atkType) deck baseDmg
+buildDamageDistributionTable :: Deck -> [Damage] -> DamageDistributionTable
+buildDamageDistributionTable deck baseDmgRange =
+  foldr (\(key, dist) tbl -> Map.insert key dist tbl) Map.empty
+    [((atkType, baseDmg), attack atkType deck baseDmg) | baseDmg <- baseDmgRange, atkType <- [Normal, Advantage, Disadvantage]]
+
+buildMeanAndVarianceTable :: DamageDistributionTable -> Map (AttackType, Damage) (Float, Float)
+buildMeanAndVarianceTable = Map.map meanAndVariance
+
+buildKillChanceTable :: DamageDistributionTable -> KillChanceTable
+buildKillChanceTable = Map.map tailDistribution
 
 killChance :: KillChanceTable -> AttackType -> Damage -> Damage -> Maybe Probability
 killChance dict atkType baseDmg resultDmg =
-  maximumMaybe $ Map.filterWithKey (\(atk, bd, rd) _ -> atk == atkType && bd == baseDmg && rd >= resultDmg) dict
-
-maximumMaybe :: (Foldable t, Ord a) => t a -> Maybe a
-maximumMaybe xs
-  | null xs = Nothing
-  | otherwise = Just $ maximum xs
+  pure dict >>= Map.lookup (atkType, baseDmg) >>= Map.lookupGE resultDmg >>= return . snd

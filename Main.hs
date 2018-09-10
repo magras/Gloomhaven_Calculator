@@ -245,8 +245,11 @@ printKillChanceTable :: Deck -> [Damage] -> IO ()
 printKillChanceTable deck baseDmgRange = do
   putStrLn $ text
   where
+    distr :: DamageDistributionTable
+    distr = buildDamageDistributionTable deck baseDmgRange
+
     dict :: KillChanceTable
-    dict = killChanceTable deck baseDmgRange
+    dict = buildKillChanceTable distr
 
     table :: [[[Maybe Probability]]]
     table = [[[killChance dict atkType baseDmg resultDmg
@@ -284,7 +287,7 @@ printKillChanceTable deck baseDmgRange = do
 
     resultDmgRange :: [Damage]
     resultDmgRange = [1..max]
-      where max = maximum $ Map.foldMapWithKey (\(_, _, d) _ -> [d]) dict
+      where max = maximum $ fmap (fst . Map.findMax) $ dict
 
     alignText :: Alignment -> Int -> String -> String
     alignText algn width str = left ++ str ++ right
