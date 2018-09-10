@@ -2,7 +2,6 @@ module Gloomhaven.AttackModifierDeckCalculator where
 
 import Control.Applicative (liftA)
 import Data.Ratio ((%))
-import Data.List (sort)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 
@@ -23,8 +22,7 @@ removeCard = Map.update (\n -> if n > 1 then Just (n - 1) else Nothing)
 
 drawCard :: (Probability, [Card], Deck) -> [(Probability, [Card], Deck)]
 drawCard (prob, cards, deck) =
-  Map.foldMapWithKey (\c n -> [(n % s * prob, c : cards, removeCard c deck)]) deck
-  where s = Map.foldl' (+) 0 deck
+  Map.foldMapWithKey (\c n -> [(n % (sum deck) * prob, c : cards, removeCard c deck)]) deck
 
 drawOneCard :: Deck -> [(Probability, [Card], Deck)]
 drawOneCard deck = [(1, [], deck)] >>= drawCard
@@ -65,12 +63,12 @@ applyModifier card = max 0 . modifier
 
 compareCards :: Damage -> Card -> Card -> Ordering
 compareCards dmg lhs rhs
-  | isRolling lhs || isRolling rhs = undefined
-  | bothSpecial = EQ
-  | valueOrd == EQ = specialOrd
-  | specialOrd == EQ = valueOrd
-  | valueOrd == specialOrd = valueOrd
-  | otherwise = EQ
+  | isRolling lhs || isRolling rhs = error "Rolling card in a comparison function. Something went wrong inside calculator."
+  | bothSpecial                    = EQ
+  | valueOrd == EQ                 = specialOrd
+  | specialOrd == EQ               = valueOrd
+  | valueOrd == specialOrd         = valueOrd
+  | otherwise                      = EQ
   where
     bothSpecial :: Bool
     bothSpecial = all hasSpecialEffect [lhs, rhs]
@@ -94,36 +92,36 @@ worstCard dmg lhs rhs =
 removeRollingFromDeck :: Deck -> Deck
 removeRollingFromDeck = Map.filterWithKey (\card _ -> not $ isRolling card)
 
-attack :: AttackType -> Deck -> Damage -> DamageDistribution
-attack Normal deck dmg =
+attack :: Deck -> AttackType -> Damage -> DamageDistribution
+attack deck Normal dmg =
   foldr (Map.unionWith (+)) Map.empty $ map applyCard $ drawOneCard $ deck
   where
     applyCard :: (Probability, [Card], Deck) -> DamageDistribution
-    applyCard (prob, [card], deck') = Map.map (*prob) $
+    applyCard (prob, [card], deck) = Map.map (*prob) $
       let d = applyModifier card dmg in
       if isRolling card then
-        attack Normal deck' d
+        attack deck Normal d
       else
         always d
 
-attack Advantage deck dmg =
+attack deck Advantage dmg =
   foldr (Map.unionWith (+)) Map.empty $ map applyCards $ drawTwoCards $ deck
   where
     applyCards :: (Probability, [Card], Deck) -> DamageDistribution
-    applyCards (prob, [c2,c1], deck') = Map.map (*prob) $
+    applyCards (prob, [c2,c1], deck) = Map.map (*prob) $
       case liftA isRolling [c1, c2] of
-        [True, True] -> attack Normal deck' $ applyModifier c2 $ applyModifier c1 $ dmg
+        [True, True] -> attack deck Normal $ applyModifier c2 $ applyModifier c1 $ dmg
         [True, False] -> always $ applyModifier c2 $ applyModifier c1 $ dmg
         [False, True] -> always $ applyModifier c1 $ applyModifier c2 $ dmg
         [False, False] -> always $ applyModifier (bestCard dmg c1 c2) dmg
 
-attack Disadvantage deck dmg =
+attack deck Disadvantage dmg =
   foldr (Map.unionWith (+)) Map.empty $ map applyCards $ drawTwoCards $ deck
   where
     applyCards :: (Probability, [Card], Deck) -> DamageDistribution
-    applyCards (prob, [c2,c1], deck') = Map.map (*prob) $
+    applyCards (prob, [c2,c1], deck) = Map.map (*prob) $
       case liftA isRolling [c1, c2] of
-        [True, True] -> attack Normal (removeRollingFromDeck deck') dmg
+        [True, True] -> attack (removeRollingFromDeck deck) Normal dmg
         [True, False] -> always $ applyModifier c2 dmg
         [False, True] -> always $ applyModifier c1 dmg
         [False, False] -> always $ applyModifier (worstCard dmg c1 c2) dmg
@@ -132,9 +130,9 @@ meanAndVariance :: DamageDistribution -> (Float, Float)
 meanAndVariance distrib =
   (mean, var)
   where
-    (m, m2) = Map.foldrWithKey folder (0,0) distrib
     folder :: Damage -> Probability -> (Rational, Rational) -> (Rational, Rational)
     folder d p (m,m2) = (m + fromIntegral d * p, m2 + fromIntegral d ^ 2 * p)
+    (m, m2) = Map.foldrWithKey folder (0,0) distrib
     mean = fromRational m
     var = fromRational $ m2 - m ^ 2
 
@@ -145,7 +143,7 @@ tailDistribution =
 buildDamageDistributionTable :: Deck -> [Damage] -> DamageDistributionTable
 buildDamageDistributionTable deck baseDmgRange =
   foldr (\(key, dist) tbl -> Map.insert key dist tbl) Map.empty
-    [((atkType, baseDmg), attack atkType deck baseDmg) | baseDmg <- baseDmgRange, atkType <- [Normal, Advantage, Disadvantage]]
+    [((atkType, baseDmg), attack deck atkType baseDmg) | baseDmg <- baseDmgRange, atkType <- [Normal, Advantage, Disadvantage]]
 
 buildMeanAndVarianceTable :: DamageDistributionTable -> Map (AttackType, Damage) (Float, Float)
 buildMeanAndVarianceTable = Map.map meanAndVariance
