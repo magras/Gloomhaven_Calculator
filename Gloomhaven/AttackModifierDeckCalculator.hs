@@ -22,7 +22,7 @@ filterZeroValues :: (Num v, Eq v) => Map k v -> Map k v
 filterZeroValues = Map.filter (/=0)
 
 removeCard :: Card -> Deck -> Deck
-removeCard = Map.update (\n -> if n > 0 then Just (n - 1) else Nothing)
+removeCard = Map.update (\n -> if n > 1 then Just (n - 1) else Nothing)
 
 drawCard :: (Probability, [Card], Deck) -> [(Probability, [Card], Deck)]
 drawCard (prob, cards, deck) =
