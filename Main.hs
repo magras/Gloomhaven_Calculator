@@ -1,7 +1,6 @@
 module Main where
 
 import Gloomhaven.AttackModifierDeckCalculator
-import Prelude hiding (Left, Right)
 import Data.Aeson (decode)
 import Data.ByteString.Lazy (ByteString)
 import qualified Data.ByteString.Lazy as ByteString
@@ -10,7 +9,7 @@ import qualified Data.Map.Strict as Map
 import Data.Maybe (fromJust)
 import Text.Printf (printf)
 
-data Alignment = Left | Right | Center
+data Alignment = LeftAlignment | RightAlignment | CenterAlignment
 
 printKillChanceTable :: Deck -> [Damage] -> IO ()
 printKillChanceTable deck baseDmgRange = do
@@ -80,20 +79,20 @@ printKillChanceTable deck baseDmgRange = do
         len = length str
         padding = width - len
         (leftPadding, rightPadding) = case algn of
-          Left -> (0, padding)
-          Right -> (padding, 0)
-          Center -> ((padding + 1) `quot` 2, padding `quot` 2)
+          LeftAlignment -> (0, padding)
+          RightAlignment -> (padding, 0)
+          CenterAlignment -> ((padding + 1) `quot` 2, padding `quot` 2)
         left = replicate leftPadding ' '
         right = replicate rightPadding ' '
 
     alignLeft :: Int -> String -> String
-    alignLeft = alignText Left
+    alignLeft = alignText LeftAlignment
 
     alignRight :: Int -> String -> String
-    alignRight = alignText Right
+    alignRight = alignText RightAlignment
 
     alignCenter :: Int -> String -> String
-    alignCenter = alignText Center
+    alignCenter = alignText CenterAlignment
 
 parseDeck :: ByteString -> Deck
 parseDeck = fromJust . decode
