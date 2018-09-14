@@ -8,6 +8,15 @@ import Data.List (intercalate)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (fromJust)
 import Text.Printf (printf)
+import qualified Options.Applicative as OptParse
+import Options.Applicative (flag', option, strOption, helper, long, help,
+                            value, metavar, eitherReader,
+                            info, fullDesc, header, progDesc,
+                            execParser, (<**>), (<|>))
+import Data.Semigroup ((<>))
+import qualified Text.Parsec as Parsec
+import qualified Text.Parsec.String as Parsec
+import System.IO (Handle, IOMode(ReadMode), openFile, stdin)
 
 data Alignment = LeftAlignment | RightAlignment | CenterAlignment
 
@@ -94,6 +103,73 @@ printKillChanceTable deck baseDmgRange = do
     alignCenter :: Int -> String -> String
     alignCenter = alignText CenterAlignment
 
+data Args = Args
+  { baseDamageRange :: [Damage]
+  , deckInput :: Input }
+
+data Input
+  = FileInput FilePath
+  | StdInput
+
+arguments :: OptParse.ParserInfo Args
+arguments = info (argParser <**> helper)
+  ( fullDesc
+  <> progDesc "Gloomhaven attack modifier deck calculator produces a kill\
+              \ chance table and some statistical characteristics of a deck\
+              \ based on attack base damage.")
+  where
+    argParser :: OptParse.Parser Args
+    argParser = Args
+      <$> option damageRangeParser
+        (  long "base-damage-range"
+        <> help "An attack base damage range may be specified as a single\
+                \ number, or as a pair of numbers sepparated by '-'.\
+                \ Default value is 3."
+        <> metavar "BEGIN[-END]"
+        <> value [3] )
+      <*> deckInputParser
+
+    deckInputParser :: OptParse.Parser Input
+    deckInputParser = deckFileInputParser <|> deckStdInputParser
+
+    deckFileInputParser :: OptParse.Parser Input
+    deckFileInputParser = FileInput <$> strOption
+      (  long "deck-file"
+      <> metavar "FILEPATH"
+      <> help "Read deck from file" )
+
+    deckStdInputParser :: OptParse.Parser Input
+    deckStdInputParser = flag' StdInput
+      (  long "deck-stdin"
+      <> help "Read deck from stdin" )
+
+    damageRangeParser :: OptParse.ReadM [Damage]
+    damageRangeParser = eitherReader $
+      \s -> mapLeft show $ Parsec.parse integerRange s s
+      where
+        buildRange :: Integer -> Maybe Integer -> [Integer]
+        buildRange first Nothing = [first]
+        buildRange first (Just last) = [first..last]
+
+        integerRange :: Parsec.Parser [Integer]
+        integerRange = buildRange
+          <$> integer
+          <*> Parsec.optionMaybe (Parsec.char '-' *> integer)
+          <* Parsec.eof
+
+        integer :: Parsec.Parser Integer
+        integer = read <$> Parsec.many1 Parsec.digit
+
+        mapLeft :: (a -> b) -> Either a c -> Either b c
+        mapLeft f (Left x) = Left (f x)
+        mapLeft _ (Right x) = Right x
+
+openInput :: Input -> IO Handle
+openInput input =
+  case input of
+    FileInput path -> openFile path ReadMode
+    StdInput -> return stdin
+
 parseDeck :: ByteString -> Deck
 parseDeck = fromJust . decode
 
@@ -108,11 +184,11 @@ validateDeck deck
 main :: IO ()
 main = do
 
-  contents <- ByteString.getContents
+  args <- execParser arguments
+
+  handle <- openInput $ deckInput args
+  contents <- ByteString.hGetContents handle
   let deck = validateDeck $ parseDeck contents
+  let baseDmgRange = baseDamageRange args
 
   printKillChanceTable deck baseDmgRange
-
-  where
-    baseDmg = 3
-    baseDmgRange = [3]
