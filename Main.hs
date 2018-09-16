@@ -6,7 +6,7 @@ import Data.ByteString.Lazy (ByteString)
 import qualified Data.ByteString.Lazy as ByteString
 import Data.List (intercalate)
 import qualified Data.Map.Strict as Map
-import Data.Maybe (fromJust)
+import Data.Maybe (fromMaybe)
 import Text.Printf (printf)
 import qualified Options.Applicative as OptParse
 import Options.Applicative (flag', option, strOption, helper, long, help,
@@ -171,7 +171,7 @@ openInput input =
     StdInput -> return stdin
 
 parseDeck :: ByteString -> Deck
-parseDeck = fromJust . decode
+parseDeck = fromMaybe (error "Can not parse deck.") . decode
 
 validateDeck :: Deck -> Deck
 validateDeck deck
