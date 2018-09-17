@@ -17,91 +17,106 @@ import Data.Semigroup ((<>))
 import qualified Text.Parsec as Parsec
 import qualified Text.Parsec.String as Parsec
 import System.IO (Handle, IOMode(ReadMode), openFile, stdin)
+import Text.Tabular (Table(Table), Header(Header, Group), Properties(NoLine, SingleLine))
+import qualified Text.Tabular.AsciiArt
 
 data Alignment = LeftAlignment | RightAlignment | CenterAlignment
 
-printKillChanceTable :: Deck -> [Damage] -> IO ()
-printKillChanceTable deck baseDmgRange = do
-  putStrLn $ text
+alignText :: Alignment -> Int -> String -> String
+alignText algn width str = left ++ str ++ right
   where
-    distr :: DamageDistributionTable
-    distr = buildDamageDistributionTable deck baseDmgRange
+    len = length str
+    padding = width - len
+    (leftPadding, rightPadding) = case algn of
+      LeftAlignment -> (0, padding)
+      RightAlignment -> (padding, 0)
+      CenterAlignment -> ((padding + 1) `quot` 2, padding `quot` 2)
+    left = replicate leftPadding ' '
+    right = replicate rightPadding ' '
 
-    dict :: KillChanceTable
-    dict = buildKillChanceTable distr
+alignLeft :: Int -> String -> String
+alignLeft = alignText LeftAlignment
 
-    table :: [[[Maybe Probability]]]
-    table = [[[killChance dict atkType baseDmg resultDmg
+alignRight :: Int -> String -> String
+alignRight = alignText RightAlignment
+
+alignCenter :: Int -> String -> String
+alignCenter = alignText CenterAlignment
+
+data Val = ValProb (Maybe Probability) | ValDmg Float | ValDiff Float
+data Hdr = HdrDmg Damage | HdrStat Char
+type Cell = [Val]
+type Tbl = Table Hdr Damage Cell
+
+buildTable :: Deck -> [Damage] -> Tbl
+buildTable deck baseDmgRange = Table
+  (Group SingleLine
+    [ Group NoLine [Header $ HdrStat 'E', Header $ HdrStat 's', Header $ HdrStat 'd']
+    , Group NoLine $ map (Header . HdrDmg) resultDmgRange
+    ])
+  (Group SingleLine $ map Header baseDmgRange)
+  (
+    [[ValDmg $ expected (atkType, baseDmg)
+      | atkType <- [Disadvantage, Normal, Advantage]]
+      | baseDmg <- baseDmgRange]
+    :
+    [[ValDmg $ sigma (atkType, baseDmg)
+      | atkType <- [Disadvantage, Normal, Advantage]]
+      | baseDmg <- baseDmgRange]
+    :
+    [[ValDiff $ delta (atkType, baseDmg)
+      | atkType <- [Disadvantage, Normal, Advantage]]
+      | baseDmg <- baseDmgRange]
+    :
+    [[[ValProb $ killChance killChanceTbl atkType baseDmg resultDmg
       | atkType <- [Disadvantage, Normal, Advantage]]
       | baseDmg <- baseDmgRange]
       | resultDmg <- resultDmgRange]
-    
-    textTable :: [[String]]
-    textTable = map (map formatter) table
-      where
-        formatter :: [Maybe Probability] -> String
-        formatter = intercalate " / " . map showMaybeProbability
+  )
+  where
+    expected = fst . (statsTbl Map.!)
+    sigma = sqrt . snd . (statsTbl Map.!)
+    delta key@(Normal, baseDmg) = expected key - fromIntegral baseDmg
+    delta key@(_, baseDmg) = expected key - expected (Normal, baseDmg)
 
-    textTableWithHeaders :: [[String]]
-    textTableWithHeaders = addHeader $ addStats $ addResultDmgColumn $ textTable
+    distr :: DamageDistributionTable
+    distr = buildDamageDistributionTable deck baseDmgRange
 
-    text :: String
-    text = intercalate "\n" $ map (intercalate " | ") $ textTableWithHeaders
+    statsTbl :: MeanAndVarianceTable
+    statsTbl = buildMeanAndVarianceTable distr
 
-    addHeader :: [[String]] -> [[String]]
-    addHeader tbl = ("  " : map (alignCenter 24 . show) baseDmgRange) : tbl
-
-    addStats :: [[String]] -> [[String]]
-    addStats tbl = -- tbl
-      (" E" : [printf "%6.2f / %6.2f / %6.2f" (expected (Disadvantage, baseDmg)) (expected (Normal, baseDmg)) (expected (Advantage, baseDmg)) | baseDmg <- baseDmgRange]) :
-      (" s" {- σ -} : [printf "%6.2f / %6.2f / %6.2f" (sigma (Disadvantage, baseDmg)) (sigma (Normal, baseDmg)) (sigma (Advantage, baseDmg)) | baseDmg <- baseDmgRange]) :
-      (" d" {- Δ -} : [printf "%+6.2f / %+6.2f / %+6.2f" (delta (Disadvantage, baseDmg)) (delta (Normal, baseDmg)) (delta (Advantage, baseDmg)) | baseDmg <- baseDmgRange]) :
-      tbl
-      where
-        stats = buildMeanAndVarianceTable distr
-        expected = fst . (stats Map.!)
-        sigma = sqrt . snd . (stats Map.!)
-        delta key@(Normal, baseDmg) = expected key - fromIntegral baseDmg
-        delta key@(Advantage, baseDmg) = expected key - expected (Normal, baseDmg)
-        delta key@(Disadvantage, baseDmg) = expected key - expected (Normal, baseDmg)
-
-    addResultDmgColumn :: [[String]] -> [[String]]
-    addResultDmgColumn = zipWith (:) (map (alignRight 2) $ map show resultDmgRange)
-
-    showMaybeProbability :: Maybe Probability -> String
-    showMaybeProbability (Just p) = showProbability p
-    showMaybeProbability Nothing = "   -  "
-
-    showProbability :: Probability -> String
-    showProbability = printf "%6.2f" . toPercent
-
-    toPercent :: Probability -> Float
-    toPercent = fromRational . (*100)
+    killChanceTbl :: KillChanceTable
+    killChanceTbl = buildKillChanceTable distr
 
     resultDmgRange :: [Damage]
     resultDmgRange = [1..max]
-      where max = maximum $ fmap (fst . Map.findMax) $ dict
+      where max = maximum $ fmap (fst . Map.findMax) $ distr
 
-    alignText :: Alignment -> Int -> String -> String
-    alignText algn width str = left ++ str ++ right
-      where
-        len = length str
-        padding = width - len
-        (leftPadding, rightPadding) = case algn of
-          LeftAlignment -> (0, padding)
-          RightAlignment -> (padding, 0)
-          CenterAlignment -> ((padding + 1) `quot` 2, padding `quot` 2)
-        left = replicate leftPadding ' '
-        right = replicate rightPadding ' '
+printTable :: Deck -> [Damage] -> IO ()
+printTable deck baseDmgRange = do
+  putStr $ Text.Tabular.AsciiArt.render formatRowHdr formatColHdr formatCell table
+  where
+    formatRowHdr :: Hdr -> String
+    formatRowHdr (HdrDmg dmg) = show dmg
+    formatRowHdr (HdrStat ch) = [ch]
 
-    alignLeft :: Int -> String -> String
-    alignLeft = alignText LeftAlignment
+    formatColHdr :: Damage -> String
+    formatColHdr = alignCenter 24 . show
 
-    alignRight :: Int -> String -> String
-    alignRight = alignText RightAlignment
+    formatCell :: Cell -> String
+    formatCell = intercalate " / " . map formatVal
 
-    alignCenter :: Int -> String -> String
-    alignCenter = alignText CenterAlignment
+    formatVal :: Val -> String
+    formatVal (ValProb (Just p)) = printf "%6.2f" $ toFloat (100 * p)
+    formatVal (ValProb Nothing) = "   -  "
+    formatVal (ValDmg dmg) = printf "%6.2f" dmg
+    formatVal (ValDiff delta) = printf "%+6.2f" delta
+
+    toFloat :: Rational -> Float
+    toFloat = fromRational
+
+    table :: Tbl
+    table = buildTable deck baseDmgRange
 
 data Args = Args
   { baseDamageRange :: [Damage]
@@ -191,4 +206,4 @@ main = do
   let deck = validateDeck $ parseDeck contents
   let baseDmgRange = baseDamageRange args
 
-  printKillChanceTable deck baseDmgRange
+  printTable deck baseDmgRange
