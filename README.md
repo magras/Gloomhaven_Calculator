@@ -1,5 +1,17 @@
 # Gloomhaven Attack Modifier Deck Calculator
 
+## Table of Contents
+
+* [Description](#description)
+  * [Algorithm](#algorithm)
+* [Building](#building)
+* [How to use](#how-to-use)
+  * [Command line arguments](#command-line-arguments)
+  * [Deck format description](#deck-format-description)
+  * [Home rules](#home-rules)
+  * [Output](#output)
+* [TODO](#todo)
+
 ## Description
 
 Gloomhaven attack modifier deck calculator produces a kill chance table and some statistical characteristics of a deck based on attack base damage.
