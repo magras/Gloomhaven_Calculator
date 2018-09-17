@@ -14,6 +14,7 @@ type Deck = Map Card Count
 type DamageDistribution = Map Damage Probability
 type DamageDistributionTable = Map (AttackType, Damage) DamageDistribution
 type KillChanceTable = Map (AttackType, Damage) DamageDistribution
+type MeanAndVarianceTable = Map (AttackType, Damage) (Float, Float)
 
 data AttackType = Normal | Advantage | Disadvantage deriving (Eq, Ord, Show)
 
@@ -145,7 +146,7 @@ buildDamageDistributionTable deck baseDmgRange =
   foldr (\(key, dist) tbl -> Map.insert key dist tbl) Map.empty
     [((atkType, baseDmg), attack deck atkType baseDmg) | baseDmg <- baseDmgRange, atkType <- [Normal, Advantage, Disadvantage]]
 
-buildMeanAndVarianceTable :: DamageDistributionTable -> Map (AttackType, Damage) (Float, Float)
+buildMeanAndVarianceTable :: DamageDistributionTable -> MeanAndVarianceTable
 buildMeanAndVarianceTable = Map.map meanAndVariance
 
 buildKillChanceTable :: DamageDistributionTable -> KillChanceTable
