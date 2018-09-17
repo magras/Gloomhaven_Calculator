@@ -25,6 +25,7 @@ An algorithm used for building probability distribution is simple: calculate a p
 To build Gloomhaven Attack Modifier Deck Calculator you need a [Haskell Platform](https://www.haskell.org/downloads#platform). After installing Haskell Platform execute this commands from the root directory of a repository:
 
     cabal sandbox init
+    cabal update
     cabal install
 
 It may take a while to download and build all dependencies. Resulting binary will be inside sandbox directory `./.cabal-sandbox/bin`.
