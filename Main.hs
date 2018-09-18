@@ -185,8 +185,12 @@ openInput input =
     FileInput path -> openFile path ReadMode
     StdInput -> return stdin
 
+stripUtf8Bom :: ByteString -> ByteString
+stripUtf8Bom str = fromMaybe str $ ByteString.stripPrefix bom str
+  where bom = ByteString.pack [0xEF, 0xBB, 0xBF]
+
 parseDeck :: ByteString -> Deck
-parseDeck = fromMaybe (error "Can not parse deck.") . decode
+parseDeck = fromMaybe (error "Can not parse deck.") . decode . stripUtf8Bom
 
 validateDeck :: Deck -> Deck
 validateDeck deck
