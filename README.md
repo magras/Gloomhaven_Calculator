@@ -126,7 +126,7 @@ Attack base damage doesn't affect probability distribution a lot, but statistica
 
 ### Deck format description
 
-Deck parsed as single JSON object, where name part represents card type and value represents a number of cards of that type.
+Deck parsed as single JSON object in UTF-8 encoding, where name part represents card type and value represents a number of cards of that type.
 
 Card type format is `[r][mod][*]`, where
 * `r` prefix means that card has rolling modifier symbol
