@@ -17,7 +17,7 @@ import Data.Semigroup ((<>))
 import qualified Text.Parsec as Parsec
 import qualified Text.Parsec.String as Parsec
 import System.IO (Handle, IOMode(ReadMode), openFile, stdin)
-import Text.Tabular (Table(Table), Header(Header, Group), Properties(NoLine, SingleLine))
+import Text.Tabular (Table(Table), Header(Header, Group), Properties(NoLine, SingleLine, DoubleLine))
 import qualified Text.Tabular.AsciiArt
 
 data Alignment = LeftAlignment | RightAlignment | CenterAlignment
@@ -50,9 +50,9 @@ type Tbl = Table Hdr Damage Cell
 
 buildTable :: Deck -> [Damage] -> Tbl
 buildTable deck baseDmgRange = Table
-  (Group SingleLine
+  (Group DoubleLine
     [ Group NoLine [Header $ HdrStat 'E', Header $ HdrStat 's', Header $ HdrStat 'd']
-    , Group NoLine $ map (Header . HdrDmg) resultDmgRange
+    , Group SingleLine $ map (Group NoLine) $ chunks 4 $ map (Header . HdrDmg) resultDmgRange
     ])
   (Group SingleLine $ map Header baseDmgRange)
   (
@@ -91,6 +91,10 @@ buildTable deck baseDmgRange = Table
     resultDmgRange :: [Damage]
     resultDmgRange = [1..max]
       where max = maximum $ fmap (fst . Map.findMax) $ distr
+
+    chunks :: Int -> [a] -> [[a]]
+    chunks _ [] = []
+    chunks n xs = take n xs : chunks n (drop n xs)
 
 printTable :: Deck -> [Damage] -> IO ()
 printTable deck baseDmgRange = do
